@@ -73,6 +73,37 @@ __global__ void twiddleImgKernel(float *wi, float *w, int N)
     }
 }
 
+__global__ void realDFTkernel(float *a, float *b, float *ab, int width)
+{
+    int tx = threadIdx.x, ty = threadIdx.y;
+
+    // allocate tiles in __shared__ memory
+    __shared__ float s_a[TILE_WIDTH][TILE_WIDTH];
+    __shared__ float s_b[TILE_WIDTH];
+    // calculate the row & col index to identify 
+
+    //element to work on
+    int row = blockIdx.y * blockDim.y + ty;
+    int col = blockIdx.x * blockDim.x + tx;
+    int idx = row * N + col;
+    float result = 0;
+
+    // loop over the tiles of the input in phases
+    for(int p = 0; p < width/TILE_WIDTH; ++p)
+    {
+      // collaboratively load tiles into __shared__
+      s_a[ty][tx] = a[row * width + (p * TILE_WIDTH + tx)];
+      s_b[idx] = b[p * TILE_WIDTH + ty];
+      __syncthreads();
+
+      // dot product between row of s_a and col of s_b
+      for(int k = 0; k < TILE_WIDTH; ++k)
+        result += s_a[ty][k] * s_b[k];
+      __syncthreads();
+    }
+    ab[row * width + col] = result;
+}
+
 int main(int agrc, char** argv)
 {
     float *x, *w, *w_r, *w_i;
@@ -98,9 +129,11 @@ int main(int agrc, char** argv)
     cudaMemset(dw_r, 0, N * N * sizeof(float));
     cudaMemset(dw_i, 0, N * N * sizeof(float));
 
+    //Taking input signal matrix
     inputKernel<<<numberOfBlocks, numberOfThreads>>>(d_x, N);
     cudaMemcpy(x, d_x, N * sizeof(float), cudaMemcpyDeviceToHost);
     printf("%f\n",x[100]);
+    
     // Calculating factor
     factorKernel<<<n/512, 512>>>(d_w, (float)N);
     cudaMemcpy(w, d_w, 2 * N * sizeof(float), cudaMemcpyDeviceToHost);
@@ -113,6 +146,14 @@ int main(int agrc, char** argv)
     // Calculating twiddle imaginary matrix
     twiddleImgKernel<<<n/512, 512>>>(dw_i, d_w, N);
     cudaMemcpy(w_i, dw_i, N * N * sizeof(float), cudaMemcpyDeviceToHost);
+    
+    dim3 numberOfThreads(TILE_WIDTH, TILE_WIDTH);
+    dim3 numberOfBlocks( (N + TILE_WIDTH -1)/TILE_WIDTH, (N + TILE_WIDTH -1)/TILE_WIDTH );
+
+    // Calculating real part of DFT of input matrix
+    realDFTkernel<<<numberOfBlocks, numberOfThreads>>>(d_x, dw_r, ddft_r, N);
+    cudaMemcpy(dft_r, ddft_r, N * sizeof(float), cudaMemcpyDeviceToHost);
+    
     /*  int i,j;
         for(i = 0; i < 50; i++)
         {
@@ -131,7 +172,3 @@ int main(int agrc, char** argv)
 */
   return 0;
 }
-
-
-
-
