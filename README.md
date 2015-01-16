@@ -2,6 +2,7 @@ parallel-prog
 =============
 
 CUDA Projects
+
 A) ConvDFT
 This code is aimed to perform Convolution operation on two input signals in parallel. 
 This is achieved using DFT on the signals. The concept used is 
